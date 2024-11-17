@@ -102,6 +102,11 @@ async def download_video(message: types.Message):
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(None, download_youtube_video, video, name)
 
+            # Check if the file exists
+            if not os.path.isfile(video_file_path):
+                await message.reply("Error: The video file could not be found after download.")
+                return
+
             video_clip = VideoFileClip(video_file_path)
 
             width, height = video_clip.size
@@ -129,7 +134,7 @@ async def download_video(message: types.Message):
             await message.reply("The video is too large.")
 
     except Exception as e:
-        print(e)
+        print(f"Error: {e}")
         if business_id is None:
             react = types.ReactionTypeEmoji(emoji="👎")
             await message.react([react])
@@ -137,6 +142,7 @@ async def download_video(message: types.Message):
         await message.reply("Something went wrong :(\nPlease try again later.")
 
     await update_info(message)
+    
 
 
 @router.callback_query(F.data.startswith('yt_audio_'))
