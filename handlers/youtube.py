@@ -44,8 +44,35 @@ def custom_oauth_verifier(verification_url, user_code):
 
 
 def download_youtube_video(video, name):
+    # Ensure the filename includes the extension
+    if not name.endswith('.mp4'):
+        name += '.mp4'
     video.download(output_path=OUTPUT_DIR, filename=name)
 
+
+# Inside your function to handle the download:
+name = f"{time}_youtube_video.mp4"  # Add .mp4 extension to the filename
+video_file_path = os.path.join(OUTPUT_DIR, name)
+
+# Verify the download path
+print(f"Downloading video to: {video_file_path}")
+
+# Attempt to download
+try:
+    download_youtube_video(video, name)
+except Exception as e:
+    print(f"Failed to download video: {e}")
+    await message.reply("Failed to download the video.")
+    return
+
+# Check if the file exists before processing
+if not os.path.exists(video_file_path):
+    print(f"File not found: {video_file_path}")
+    await message.reply("Something went wrong. The file could not be found.")
+    return
+
+# Proceed with MoviePy processing
+video_clip = VideoFileClip(video_file_path)
 
 # Download video
 @router.message(F.text.regexp(r"(https?://(www\.)?(youtube|youtu|youtube-nocookie)\.(com|be)/\S+)"))
