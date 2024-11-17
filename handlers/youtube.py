@@ -65,7 +65,7 @@ async def download_video(message: types.Message):
             await message.react([react])
 
         time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        name = f"{time}_youtube_video.mp4"
+        name = f"{time}_youtube_video"
 
         yt = YouTube(url, use_oauth=True, allow_oauth_cache=True, on_progress_callback=on_progress,
                      oauth_verifier=custom_oauth_verifier)
