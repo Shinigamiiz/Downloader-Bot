@@ -53,12 +53,12 @@ def custom_oauth_verifier(verification_url, user_code):
 
 
 def download_youtube_video(video, file_name_no_ext):
-    video.download(output_path=OUTPUT_DIR, filename=f"{file_name_no_ext}.mp4")
+    video.download(output_path=OUTPUT_DIR, filename=f"{file_name_no_ext}")
 
 
 # Check if a file exists regardless of the .mp4 extension
 def ensure_file_exists(file_name_no_ext):
-    file_path = os.path.join(OUTPUT_DIR, f"{file_name_no_ext}.mp4")
+    file_path = os.path.join(OUTPUT_DIR, f"{file_name_no_ext}")
     return os.path.exists(file_path) and os.path.isfile(file_path)
 
 
