@@ -2,6 +2,7 @@ import asyncio
 import datetime
 import os
 import time
+import logging
 
 import requests
 from aiogram import types, Router, F
@@ -23,6 +24,10 @@ router = Router()
 # Ensure OUTPUT_DIR exists
 if not os.path.exists(OUTPUT_DIR):
     os.makedirs(OUTPUT_DIR)
+
+# Set up logging to monitor the issues
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 
 def custom_oauth_verifier(verification_url, user_code):
@@ -50,18 +55,35 @@ def custom_oauth_verifier(verification_url, user_code):
 def download_youtube_video(video, path):
     try:
         video.download(output_path=OUTPUT_DIR, filename=path)
-        print(f"Downloaded video to {path}")
+        logger.info(f"Downloaded video to {path}")
     except Exception as e:
-        print(f"Error downloading video: {e}")
+        logger.error(f"Error downloading video: {e}")
 
 
-async def wait_for_file(file_path, retries=3, delay=1):
-    """Check for file existence with retries."""
+async def ensure_file_exists(file_path, retries=5, delay=2):
+    """Check if a file exists with multiple retries."""
     for attempt in range(retries):
-        if os.path.exists(file_path):
+        if os.path.exists(file_path) and os.path.isfile(file_path):
+            logger.info(f"File found: {file_path}")
             return True
+        logger.warning(f"Attempt {attempt + 1}/{retries}: File not found. Retrying...")
         await asyncio.sleep(delay)
+    logger.error(f"Failed to find the file after {retries} retries: {file_path}")
     return False
+
+
+async def open_video_clip_safe(file_path, retries=3):
+    """Safely open a video clip, retrying on failure."""
+    for attempt in range(retries):
+        try:
+            video_clip = VideoFileClip(file_path)
+            logger.info(f"Successfully opened video file on attempt {attempt + 1}")
+            return video_clip
+        except Exception as e:
+            logger.warning(f"Error opening video file (attempt {attempt + 1}): {e}")
+            await asyncio.sleep(1)
+    logger.error(f"Failed to open video file after {retries} attempts: {file_path}")
+    return None
 
 
 @router.message(F.text.regexp(r"(https?://(www\.)?(youtube|youtu|youtube-nocookie)\.(com|be)/\S+)"))
@@ -115,18 +137,17 @@ async def download_video(message: types.Message):
             await loop.run_in_executor(None, download_youtube_video, video, file_name)
 
             # Wait for the file to appear with retries
-            if not await wait_for_file(video_file_path):
+            if not await ensure_file_exists(video_file_path):
                 await message.reply("Failed to locate the downloaded video. Please try again later.")
                 return
 
             # Verify that the file can be accessed by VideoFileClip
-            try:
-                video_clip = VideoFileClip(video_file_path)
-                width, height = video_clip.size
-            except Exception as e:
-                print(f"Error opening video file: {e}")
+            video_clip = await open_video_clip_safe(video_file_path)
+            if video_clip is None:
                 await message.reply("Failed to process the downloaded video.")
                 return
+
+            width, height = video_clip.size
 
             if business_id is None:
                 await bot.send_chat_action(message.chat.id, "upload_video")
@@ -148,7 +169,7 @@ async def download_video(message: types.Message):
             await message.reply("The video is too large.")
 
     except Exception as e:
-        print(e)
+        logger.error(f"An unexpected error occurred: {e}")
         if business_id is None:
             react = types.ReactionTypeEmoji(emoji="👎")
             await message.react([react])
@@ -156,6 +177,7 @@ async def download_video(message: types.Message):
         await message.reply("Something went wrong :(\nPlease try again later.")
 
     await update_info(message)
+
     
 
 @router.callback_query(F.data.startswith('yt_audio_'))
