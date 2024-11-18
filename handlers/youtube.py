@@ -44,7 +44,17 @@ def custom_oauth_verifier(verification_url, user_code):
 
 
 def download_youtube_video(video, name):
+    # Ensure the filename ends with '.mp4'
+    if not name.endswith(".mp4"):
+        name += ".mp4"
     video.download(output_path=OUTPUT_DIR, filename=name)
+
+
+def get_full_video_path(name):
+    # Always add '.mp4' to the name for consistency
+    if not name.endswith(".mp4"):
+        name += ".mp4"
+    return os.path.join(OUTPUT_DIR, name)
 
 
 # Download video
@@ -64,8 +74,8 @@ async def download_video(message: types.Message):
             react = types.ReactionTypeEmoji(emoji="👨‍💻")
             await message.react([react])
 
-        time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        name = f"{time}_youtube_video.mp4"
+        time_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        name = f"{time_str}_youtube_video"
 
         yt = YouTube(url, use_oauth=True, allow_oauth_cache=True, on_progress_callback=on_progress,
                      oauth_verifier=custom_oauth_verifier)
@@ -98,17 +108,16 @@ async def download_video(message: types.Message):
 
         if size < MAX_FILE_SIZE:
 
-            video_file_path = os.path.join(OUTPUT_DIR, name)
+            video_file_path = get_full_video_path(name)
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(None, download_youtube_video, video, name)
 
-            # Check if the file exists
+            # Confirm the file exists before processing
             if not os.path.isfile(video_file_path):
                 await message.reply("Error: The video file could not be found after download.")
                 return
 
             video_clip = VideoFileClip(video_file_path)
-
             width, height = video_clip.size
 
             if business_id is None:
@@ -142,7 +151,6 @@ async def download_video(message: types.Message):
         await message.reply("Something went wrong :(\nPlease try again later.")
 
     await update_info(message)
-    
 
 
 @router.callback_query(F.data.startswith('yt_audio_'))
