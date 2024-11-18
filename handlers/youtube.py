@@ -118,7 +118,7 @@ async def download_video(message: types.Message):
                 await message.reply("Failed to locate the downloaded video. Please try again later.")
                 return
 
-            video_file_path = os.path.join(OUTPUT_DIR, f"{file_name_no_ext}.mp4")
+            video_file_path = os.path.join(OUTPUT_DIR, f"{file_name_no_ext}")
 
             # Verify that the file can be accessed by VideoFileClip
             try:
