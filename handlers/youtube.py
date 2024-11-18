@@ -1,13 +1,12 @@
 import asyncio
 import datetime
 import os
-import time
 import logging
 
 import requests
 from aiogram import types, Router, F
 from aiogram.types import FSInputFile
-from moviepy.editor import VideoFileClip, AudioFileClip
+from moviepy.editor import VideoFileClip
 from pytubefix import YouTube
 from pytubefix.cli import on_progress
 
@@ -17,7 +16,7 @@ from config import OUTPUT_DIR, BOT_TOKEN, admin_id
 from handlers.user import update_info
 from main import bot, db, send_analytics
 
-MAX_FILE_SIZE = 1 * 1024 * 1024
+MAX_FILE_SIZE = 1 * 1024 * 1024  # Max file size in KB
 
 router = Router()
 
@@ -25,62 +24,38 @@ router = Router()
 if not os.path.exists(OUTPUT_DIR):
     os.makedirs(OUTPUT_DIR)
 
-# Set up logging to monitor the issues
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 
 def custom_oauth_verifier(verification_url, user_code):
     send_message_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-
     params = {
         "chat_id": admin_id,
         "text": f"<b>OAuth Verification</b>\n\nOpen this URL in your browser:\n{verification_url}\n\nEnter this code:\n<code>{user_code}</code>",
         "parse_mode": "HTML"
     }
-
-    response = requests.get(send_message_url, params=params)
-
-    if response.status_code == 200:
-        print("Message sent successfully.")
-    else:
-        print(f"Failed to send message. Status code: {response.status_code}")
-
-    # Countdown
-    for i in range(30, 0, -5):
-        print(f"{i} seconds remaining")
-        time.sleep(5)
+    requests.get(send_message_url, params=params)
 
 
-def download_youtube_video(video, file_name_no_ext):
-    video.download(output_path=OUTPUT_DIR, filename=f"{file_name_no_ext}")
+def download_youtube_video(video, path):
+    video.download(output_path=OUTPUT_DIR, filename=path)
 
 
-# Check if a file exists regardless of the .mp4 extension
-def ensure_file_exists(file_name_no_ext):
-    file_path = os.path.join(OUTPUT_DIR, f"{file_name_no_ext}")
-    return os.path.exists(file_path) and os.path.isfile(file_path)
-
-
-# Download video
 @router.message(F.text.regexp(r"(https?://(www\.)?(youtube|youtu|youtube-nocookie)\.(com|be)/\S+)"))
 @router.business_message(F.text.regexp(r"(https?://(www\.)?(youtube|youtu|youtube-nocookie)\.(com|be)/\S+)"))
 async def download_video(message: types.Message):
     business_id = message.business_connection_id
-
     await send_analytics(user_id=message.from_user.id, chat_type=message.chat.type, action_name="youtube_video")
-
+    
     bot_url = f"t.me/{(await bot.get_me()).username}"
     file_type = "video"
-
     url = message.text
-    try:
-        if business_id is None:
-            react = types.ReactionTypeEmoji(emoji="👨‍💻")
-            await message.react([react])
 
+    try:
         time_stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        file_name_no_ext = f"{time_stamp}_youtube_video"
+        base_name = f"{time_stamp}_youtube_video"  # Base name without extension
+        full_name = f"{base_name}.mp4"  # Full name with extension
 
         yt = YouTube(url, use_oauth=True, allow_oauth_cache=True, on_progress_callback=on_progress,
                      oauth_verifier=custom_oauth_verifier)
@@ -97,9 +72,7 @@ async def download_video(message: types.Message):
         db_file_id = await db.get_file_id(yt.watch_url)
 
         if db_file_id:
-            if business_id is None:
-                await bot.send_chat_action(message.chat.id, "upload_video")
-
+            await bot.send_chat_action(message.chat.id, "upload_video")
             await message.answer_video(video=db_file_id[0][0],
                                        caption=bm.captions(user_captions, post_caption, bot_url),
                                        reply_markup=kb.return_audio_download_keyboard("yt", yt.watch_url) if business_id is None else None,
@@ -109,52 +82,40 @@ async def download_video(message: types.Message):
         size = video.filesize_kb
 
         if size < MAX_FILE_SIZE:
-
+            video_file_path = os.path.join(OUTPUT_DIR, full_name)
             loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, download_youtube_video, video, file_name_no_ext)
+            await loop.run_in_executor(None, download_youtube_video, video, full_name)
 
-            # Wait until the file appears
-            if not ensure_file_exists(file_name_no_ext):
+            if not os.path.isfile(video_file_path):
+                logger.error(f"Failed to find the file: {video_file_path}")
                 await message.reply("Failed to locate the downloaded video. Please try again later.")
                 return
 
-            video_file_path = os.path.join(OUTPUT_DIR, f"{file_name_no_ext}")
+            # Open the video file to get size properties
+            video_clip = VideoFileClip(video_file_path)
+            width, height = video_clip.size
 
-            # Verify that the file can be accessed by VideoFileClip
-            try:
-                video_clip = VideoFileClip(video_file_path)
-                width, height = video_clip.size
-            except Exception as e:
-                await message.reply(f"Failed to open the downloaded video: {e}")
-                return
-
-            if business_id is None:
-                await bot.send_chat_action(message.chat.id, "upload_video")
-
+            await bot.send_chat_action(message.chat.id, "upload_video")
             sent_message = await message.answer_video(video=FSInputFile(video_file_path),
                                                       width=width,
                                                       height=height,
                                                       caption=bm.captions(user_captions, post_caption, bot_url),
                                                       reply_markup=kb.return_audio_download_keyboard("yt", yt.watch_url) if business_id is None else None)
             file_id = sent_message.video.file_id
-
             await db.add_file(yt.watch_url, file_id, file_type)
 
             await asyncio.sleep(5)
 
-        else:
-            if business_id is None:
-                react = types.ReactionTypeEmoji(emoji="👎")
-                await message.react([react])
+            # Clean up the downloaded video
+            os.remove(video_file_path)
 
+        else:
+            await message.react([types.ReactionTypeEmoji(emoji="👎")])
             await message.reply("The video is too large.")
 
     except Exception as e:
         logger.error(f"An unexpected error occurred: {e}")
-        if business_id is None:
-            react = types.ReactionTypeEmoji(emoji="👎")
-            await message.react([react])
-
+        await message.react([types.ReactionTypeEmoji(emoji="👎")])
         await message.reply("Something went wrong :(\nPlease try again later.")
 
     await update_info(message)
