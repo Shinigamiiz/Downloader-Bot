@@ -44,20 +44,19 @@ def custom_oauth_verifier(verification_url, user_code):
 
 
 def download_youtube_video(video, name):
-    # Ensure the filename ends with '.mp4'
-    if not name.endswith(".mp4"):
-        name += ".mp4"
-    video.download(output_path=OUTPUT_DIR, filename=name)
+    try:
+        video.download(output_path=OUTPUT_DIR, filename=name)
+    except Exception as e:
+        print(f"Error downloading video: {e}")
 
 
-def get_full_video_path(name):
-    # Always add '.mp4' to the name for consistency
-    if not name.endswith(".mp4"):
-        name += ".mp4"
-    return os.path.join(OUTPUT_DIR, name)
+def check_file_exists(file_path):
+    if not os.path.exists(file_path):
+        print(f"File not found: {file_path}")
+        return False
+    return True
 
 
-# Download video
 @router.message(F.text.regexp(r"(https?://(www\.)?(youtube|youtu|youtube-nocookie)\.(com|be)/\S+)"))
 @router.business_message(F.text.regexp(r"(https?://(www\.)?(youtube|youtu|youtube-nocookie)\.(com|be)/\S+)"))
 async def download_video(message: types.Message):
@@ -74,8 +73,8 @@ async def download_video(message: types.Message):
             react = types.ReactionTypeEmoji(emoji="👨‍💻")
             await message.react([react])
 
-        time_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        name = f"{time_str}_youtube_video"
+        time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        name = f"{time}_youtube_video.mp4"
 
         yt = YouTube(url, use_oauth=True, allow_oauth_cache=True, on_progress_callback=on_progress,
                      oauth_verifier=custom_oauth_verifier)
@@ -90,7 +89,6 @@ async def download_video(message: types.Message):
         post_caption = yt.title
 
         user_captions = await db.get_user_captions(message.from_user.id)
-
         db_file_id = await db.get_file_id(yt.watch_url)
 
         if db_file_id:
@@ -101,20 +99,18 @@ async def download_video(message: types.Message):
                                        caption=bm.captions(user_captions, post_caption, bot_url),
                                        reply_markup=kb.return_audio_download_keyboard("yt",
                                                                                       yt.watch_url) if business_id is None else None,
-                                       parse_mode="HTMl")
+                                       parse_mode="HTML")
             return
 
         size = video.filesize_kb
+        video_file_path = os.path.join(OUTPUT_DIR, name)
 
         if size < MAX_FILE_SIZE:
-
-            video_file_path = get_full_video_path(name)
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(None, download_youtube_video, video, name)
 
-            # Confirm the file exists before processing
-            if not os.path.isfile(video_file_path):
-                await message.reply("Error: The video file could not be found after download.")
+            if not check_file_exists(video_file_path):
+                await message.reply("Failed to download the video. Please try again later.")
                 return
 
             video_clip = VideoFileClip(video_file_path)
@@ -130,20 +126,16 @@ async def download_video(message: types.Message):
                                                       reply_markup=kb.return_audio_download_keyboard("yt",
                                                                                                      yt.watch_url) if business_id is None else None)
             file_id = sent_message.video.file_id
-
             await db.add_file(yt.watch_url, file_id, file_type)
-
             await asyncio.sleep(5)
-
         else:
             if business_id is None:
                 react = types.ReactionTypeEmoji(emoji="👎")
                 await message.react([react])
 
             await message.reply("The video is too large.")
-
     except Exception as e:
-        print(f"Error: {e}")
+        print(e)
         if business_id is None:
             react = types.ReactionTypeEmoji(emoji="👎")
             await message.react([react])
