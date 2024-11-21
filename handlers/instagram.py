@@ -55,34 +55,6 @@ async def instaloader_login(L, login, password, admin_id):
             await asyncio.to_thread(L.save_session_to_file)
 
 
-from instaloader import Profile, StoryItem
-
-async def download_stories(username):
-    # Ensure you're logged in
-    await instaloader_login(L, INST_LOGIN, INST_PASS, admin_id)
-    
-    try:
-        # Load profile
-        profile = Profile.from_username(L.context, username)
-        
-        # Check if the user has active stories
-        stories = L.get_stories(userids=[profile.userid])
-        
-        # Directory to save the stories
-        story_dir = os.path.join(OUTPUT_DIR, f"{username}_stories")
-        os.makedirs(story_dir, exist_ok=True)
-        
-        for story in stories:
-            for item in story.get_items():
-                # Download each story item to the specified directory
-                L.download_storyitem(item, target=story_dir)
-
-        return story_dir  # Return the directory with downloaded stories
-
-    except Exception as e:
-        print(f"Error downloading stories for {username}: {e}")
-        return None  # Return None to indicate failure
-
 @router.message(F.text.regexp(r"(https?://(www\.)?instagram\.com/\S+)"))
 @router.business_message(F.text.regexp(r"(https?://(www\.)?instagram\.com/\S+)"))
 async def process_url_instagram(message: types.Message):
@@ -104,56 +76,7 @@ async def process_url_instagram(message: types.Message):
         react = types.ReactionTypeEmoji(emoji="👨‍💻")
         await message.react([react])
 
-    # Check if the URL is for a story
-    if "/stories/" in url:
-        # Extract the username from the story URL
-        try:
-            username_match = re.search(r"instagram\.com/stories/([^/]+)/", url)
-            if username_match:
-                username = username_match.group(1)
-                story_dir = await download_stories(username)
-                
-                if story_dir:
-                    media_group = MediaGroupBuilder(caption=f"Stories from {username}")
-                    batch_size = 10
-                    batch = 0
-                    
-                    for root, _, files in os.walk(story_dir):
-                        for file in files:
-                            file_path = os.path.join(root, file)
-                            if file.endswith(('.jpg', '.jpeg', '.png')):
-                                media_group.add_photo(media=FSInputFile(file_path), parse_mode="HTML")
-                                batch += 1
-                            elif file.endswith('.mp4'):
-                                media_group.add_video(media=FSInputFile(file_path), parse_mode="HTML")
-                                batch += 1
-
-                            if batch == batch_size:
-                                await message.answer_media_group(media=media_group.build())
-                                media_group = MediaGroupBuilder(caption=f"Stories from {username}")
-
-                    if batch > 0:
-                        await message.answer_media_group(media=media_group.build())
-
-                    # Clean up downloaded story files
-                    for root, dirs, files in os.walk(story_dir):
-                        for file in files:
-                            os.remove(os.path.join(root, file))
-                        os.rmdir(story_dir)
-                else:
-                    await message.reply("Failed to download stories. The user might have no active stories or the account is private.")
-            else:
-                await message.reply("Could not extract the username from the story URL.")
-                
-        except Exception as e:
-            print(e)
-            if business_id is None:
-                react = types.ReactionTypeEmoji(emoji="👎")
-                await message.react([react])
-            await message.reply("Something went wrong while downloading the story. Please try again later.")
-        return
-
-    # Handle normal Instagram posts
+    # Get the Instagram post from URL
     try:
         post = instaloader.Post.from_shortcode(L.context, url.split("/")[-2])
         user_captions = await db.get_user_captions(message.from_user.id)
@@ -239,4 +162,3 @@ async def process_url_instagram(message: types.Message):
         await message.reply("Something went wrong :(\nPlease try again later.")
 
     await update_info(message)
-                        
